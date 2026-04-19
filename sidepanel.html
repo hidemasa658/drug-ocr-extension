@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>ぞうさん薬局 薬名転写</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <header class="header">
+    <img class="header__logo" src="logo_yoko.png" alt="ぞうさん薬局">
+    <button id="refreshBtn" class="icon-btn" title="更新">↻</button>
+    <button id="settingsBtn" class="icon-btn" title="設定/ログ">⚙</button>
+  </header>
+
+  <main>
+    <div id="status" class="status hidden"></div>
+    <div id="error" class="error hidden"></div>
+    <div id="history"></div>
+  </main>
+
+  <aside id="settingsPanel" class="settings hidden">
+    <div class="settings__header">
+      <strong>設定・ログ</strong>
+      <button id="settingsClose" class="icon-btn">×</button>
+    </div>
+    <div class="settings__body">
+      <label class="switch-row">
+        <input type="checkbox" id="debugToggle">
+        <span>デバッグモード（console に詳細ログ）</span>
+      </label>
+
+      <div class="log-section">
+        <div class="log-header">
+          <span>ログ (<span id="logCount">0</span>)</span>
+          <button id="logClear" class="icon-btn">クリア</button>
+        </div>
+        <ul id="logList" class="log-list"></ul>
+      </div>
+    </div>
+  </aside>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>
