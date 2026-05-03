@@ -275,7 +275,133 @@ $("debugToggle").addEventListener("change", async (e) => {
   await chrome.storage.local.set({ debugMode });
   log("info", "debugMode", debugMode ? "ON" : "OFF");
 });
-$("refreshBtn").addEventListener("click", fetchRecords);
+$("refreshBtn").addEventListener("click", () => {
+  fetchRecords();
+  if (currentTab === "questionnaire") fetchQuestionnaires();
+});
+
+// ---- Tabs ----
+let currentTab = "ocr";
+let questionnaireLoaded = false;
+
+document.querySelectorAll(".tab").forEach((t) => {
+  t.addEventListener("click", () => {
+    const name = t.dataset.tab;
+    currentTab = name;
+    document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x === t));
+    document.querySelectorAll(".tab-panel").forEach((p) => p.classList.toggle("active", p.id === "tab-" + name));
+    if (name === "questionnaire" && !questionnaireLoaded) {
+      fetchQuestionnaires();
+      questionnaireLoaded = true;
+    }
+  });
+});
+
+// ---- Questionnaire ----
+async function fetchQuestionnaires() {
+  const errEl = $("questionnaireError");
+  try {
+    const res = await fetch(`${API_BASE}/api/huchinobe/list`, { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    renderQuestionnaires(data.records || []);
+    errEl.classList.add("hidden");
+    if (debugMode) log("info", "fetchQuestionnaires", `count=${(data.records || []).length}`);
+  } catch (e) {
+    errEl.classList.remove("hidden");
+    errEl.textContent = `アンケート取得失敗: ${e.message}`;
+    log("err", "fetchQuestionnaires", e.message);
+  }
+}
+
+function renderQuestionnaires(rows) {
+  const container = $("questionnaireList");
+  container.innerHTML = "";
+  if (rows.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "status";
+    empty.textContent = "まだ回答がありません";
+    container.appendChild(empty);
+    return;
+  }
+  for (const r of rows) {
+    container.appendChild(makeQuestionnaireCard(r));
+  }
+}
+
+function field(label, value) {
+  if (!value) return null;
+  const row = document.createElement("div");
+  row.className = "q-field";
+  const l = document.createElement("span");
+  l.className = "q-field__label";
+  l.textContent = label;
+  const v = document.createElement("span");
+  v.className = "q-field__value";
+  v.textContent = value;
+  row.appendChild(l);
+  row.appendChild(v);
+  return row;
+}
+
+function makeQuestionnaireCard(r) {
+  const card = document.createElement("div");
+  card.className = "q-card";
+
+  const head = document.createElement("button");
+  head.type = "button";
+  head.className = "q-card__head";
+
+  const id = document.createElement("span");
+  id.className = "q-card__id";
+  id.textContent = "#" + r.id;
+  head.appendChild(id);
+
+  const name = document.createElement("span");
+  name.className = "q-card__name";
+  name.textContent = r.user_name || "(無記名)";
+  head.appendChild(name);
+
+  const date = document.createElement("span");
+  date.className = "q-card__date";
+  date.textContent = (r.created_at || "").slice(5, 16); // MM-DD HH:MM
+  head.appendChild(date);
+
+  const chev = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  chev.setAttribute("class", "q-card__chevron");
+  chev.setAttribute("viewBox", "0 0 16 16");
+  chev.setAttribute("fill", "none");
+  chev.innerHTML = '<path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>';
+  head.appendChild(chev);
+
+  head.addEventListener("click", () => card.classList.toggle("open"));
+  card.appendChild(head);
+
+  const body = document.createElement("div");
+  body.className = "q-card__body";
+  const fields = [
+    ["電話", r.phone],
+    ["住所", r.address],
+    ["体重", r.weight],
+    ["疾患", r.disease],
+    ["お薬", r.medicine],
+    ["食物アレルギー", r.allergy],
+    ["副作用経験", r.sideeffects],
+    ["習慣的摂取", r.habit],
+    ["生活", r.lifestyle],
+    ["その他相談", r.consultation],
+    ["妊娠・授乳", r.female],
+    ["かかりつけ", r.kakaritsuke],
+    ["来局きっかけ", r.kikkake],
+  ];
+  for (const [k, v] of fields) {
+    const row = field(k, v);
+    if (row) body.appendChild(row);
+  }
+  card.appendChild(body);
+
+  return card;
+}
 
 // グローバルエラーを拾ってログに流す
 window.addEventListener("error", (e) => {

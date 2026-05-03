@@ -71,6 +71,108 @@ main { padding: 8px 12px 32px; }
 }
 .hidden { display: none !important; }
 
+.tabs {
+  display: flex;
+  gap: 2px;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  padding: 0 8px;
+  position: sticky;
+  top: 45px;
+  z-index: 9;
+}
+.tab {
+  background: transparent;
+  border: 0;
+  padding: 8px 12px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-3);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 100ms, border-color 100ms;
+}
+.tab:hover { color: var(--text-2); }
+.tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+.q-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 6px;
+  overflow: hidden;
+}
+.q-card__head {
+  padding: 8px 10px;
+  background: transparent;
+  border: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  color: var(--text);
+  font-size: 12px;
+}
+.q-card__head:hover { background: #f8fafc; }
+.q-card__id {
+  background: var(--primary);
+  color: #fff;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 9px;
+  flex-shrink: 0;
+}
+.q-card__name {
+  font-weight: 700;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.q-card__date {
+  font-size: 10px;
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+.q-card__chevron {
+  width: 12px;
+  height: 12px;
+  color: var(--text-3);
+  transition: transform 150ms;
+  flex-shrink: 0;
+}
+.q-card.open .q-card__chevron { transform: rotate(180deg); }
+.q-card__body {
+  display: none;
+  padding: 0 10px 10px;
+  border-top: 1px solid var(--border);
+}
+.q-card.open .q-card__body { display: block; }
+.q-field {
+  display: flex;
+  gap: 6px;
+  padding: 4px 0;
+  font-size: 11px;
+  border-bottom: 1px solid rgba(15,23,42,0.04);
+}
+.q-field:last-child { border-bottom: none; }
+.q-field__label {
+  font-weight: 700;
+  color: var(--text-2);
+  min-width: 80px;
+  flex-shrink: 0;
+}
+.q-field__value {
+  color: var(--text);
+  word-break: break-word;
+}
+
 .history-card {
   background: var(--card);
   border: 1px solid var(--border);
