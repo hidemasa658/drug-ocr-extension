@@ -173,6 +173,35 @@ main { padding: 8px 12px 32px; }
   word-break: break-word;
 }
 
+.q-group {
+  border-left: 3px solid var(--primary);
+  padding-left: 8px;
+  margin-bottom: 12px;
+}
+.q-group__header {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-2);
+  background: linear-gradient(135deg, #f0f9ff, #e0f2fe);
+  border-radius: 6px;
+  padding: 4px 8px;
+  margin-bottom: 4px;
+}
+.q-group .q-card { margin-bottom: 4px; }
+.q-group .q-card:last-child { margin-bottom: 0; }
+
+.q-badge {
+  background: var(--text-3);
+  color: #fff;
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 7px;
+  flex-shrink: 0;
+}
+.q-badge--self {
+  background: var(--primary-hover);
+}
+
 .history-card {
   background: var(--card);
   border: 1px solid var(--border);

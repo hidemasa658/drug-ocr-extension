@@ -314,6 +314,29 @@ async function fetchQuestionnaires() {
   }
 }
 
+function groupQuestionnaires(rows) {
+  const seen = new Set();
+  const items = [];
+  for (const r of rows) {
+    const fg = r.family_group_id;
+    if (fg) {
+      if (seen.has(fg)) continue;
+      seen.add(fg);
+      const members = rows
+        .filter((x) => x.family_group_id === fg)
+        .sort((a, b) => {
+          if (a.family_role === "self" && b.family_role !== "self") return -1;
+          if (b.family_role === "self" && a.family_role !== "self") return 1;
+          return a.id - b.id;
+        });
+      items.push({ isGroup: true, rows: members });
+    } else {
+      items.push({ isGroup: false, rows: [r] });
+    }
+  }
+  return items;
+}
+
 function renderQuestionnaires(rows) {
   const container = $("questionnaireList");
   container.innerHTML = "";
@@ -324,8 +347,30 @@ function renderQuestionnaires(rows) {
     container.appendChild(empty);
     return;
   }
-  for (const r of rows) {
-    container.appendChild(makeQuestionnaireCard(r));
+  const items = groupQuestionnaires(rows);
+  for (const it of items) {
+    if (it.isGroup) {
+      const wrap = document.createElement("div");
+      wrap.className = "q-group";
+      const header = document.createElement("div");
+      header.className = "q-group__header";
+      header.textContent = `家族グループ (${it.rows.length}名)`;
+      wrap.appendChild(header);
+      let familyIdx = 0;
+      for (const r of it.rows) {
+        let label;
+        if (r.family_role === "self") {
+          label = "本人";
+        } else {
+          familyIdx++;
+          label = `ご家族 ${familyIdx}人目`;
+        }
+        wrap.appendChild(makeQuestionnaireCard(r, label));
+      }
+      container.appendChild(wrap);
+    } else {
+      container.appendChild(makeQuestionnaireCard(it.rows[0]));
+    }
   }
 }
 
@@ -344,7 +389,7 @@ function field(label, value) {
   return row;
 }
 
-function makeQuestionnaireCard(r) {
+function makeQuestionnaireCard(r, roleLabel) {
   const card = document.createElement("div");
   card.className = "q-card";
 
@@ -361,6 +406,13 @@ function makeQuestionnaireCard(r) {
   name.className = "q-card__name";
   name.textContent = r.user_name || "(無記名)";
   head.appendChild(name);
+
+  if (roleLabel) {
+    const badge = document.createElement("span");
+    badge.className = "q-badge" + (r.family_role === "self" ? " q-badge--self" : "");
+    badge.textContent = roleLabel;
+    head.appendChild(badge);
+  }
 
   const date = document.createElement("span");
   date.className = "q-card__date";
