@@ -202,6 +202,23 @@ main { padding: 8px 12px 32px; }
   background: var(--primary-hover);
 }
 
+.q-transfer-btn {
+  background: var(--success);
+  color: #fff;
+  border: 0;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+  flex-shrink: 0;
+  margin-left: auto;
+  transition: opacity 100ms;
+}
+.q-transfer-btn:hover { opacity: 0.85; }
+.q-transfer-btn:disabled { opacity: 0.5; cursor: wait; }
+
 .history-card {
   background: var(--card);
   border: 1px solid var(--border);

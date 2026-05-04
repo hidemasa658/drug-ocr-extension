@@ -297,6 +297,123 @@ document.querySelectorAll(".tab").forEach((t) => {
   });
 });
 
+// ---- DOM mapping cache (per domain) ----
+const domMappingsCache = new Map(); // domain -> {mappings, fields}
+
+async function fetchDomMappings(domain) {
+  if (!domain) return { mappings: [], fields: [] };
+  if (domMappingsCache.has(domain)) return domMappingsCache.get(domain);
+  try {
+    const res = await fetch(`${API_BASE}/api/huchinobe/dom-mappings?domain=${encodeURIComponent(domain)}`, { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const result = { mappings: data.mappings || [], fields: data.fields || [] };
+    domMappingsCache.set(domain, result);
+    return result;
+  } catch (e) {
+    log("err", "fetchDomMappings", e.message);
+    return { mappings: [], fields: [] };
+  }
+}
+
+// 対象タブで XPath に値を書き込む（タブ内で実行される関数）
+function injectFillByXPaths(items) {
+  const results = [];
+  for (const it of items) {
+    try {
+      const xr = document.evaluate(it.xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+      const el = xr.singleNodeValue;
+      if (!el) { results.push({ field: it.field, ok: false, reason: "要素未発見" }); continue; }
+      const tag = el.tagName;
+      const isInput = tag === "INPUT" || tag === "TEXTAREA";
+      const isSelect = tag === "SELECT";
+      const isCE = el.isContentEditable;
+
+      if (isCE) {
+        el.focus();
+        document.execCommand("insertText", false, it.value);
+      } else if (isSelect) {
+        // value 一致 or label 一致を試す
+        let matched = false;
+        for (const opt of el.options) {
+          if (opt.value === it.value || opt.textContent.trim() === it.value) {
+            el.value = opt.value; matched = true; break;
+          }
+        }
+        if (!matched) { results.push({ field: it.field, ok: false, reason: `select候補に '${it.value}' なし` }); continue; }
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+      } else if (isInput) {
+        const proto = Object.getPrototypeOf(el);
+        const desc = Object.getOwnPropertyDescriptor(proto, "value");
+        if (desc && desc.set) desc.set.call(el, it.value);
+        else el.value = it.value;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+      } else {
+        // 通常要素: textContent
+        el.textContent = it.value;
+      }
+      results.push({ field: it.field, ok: true });
+    } catch (e) {
+      results.push({ field: it.field, ok: false, reason: String(e).slice(0, 100) });
+    }
+  }
+  return results;
+}
+
+async function transferToActiveTab(record) {
+  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if (!tab) throw new Error("アクティブなタブがありません");
+  const url = tab.url || "";
+  if (/^(chrome|edge|brave|about|chrome-extension|moz-extension):/i.test(url)) {
+    throw new Error(`このページには書き込めません(${url.split(":")[0]}:)`);
+  }
+  let domain = "";
+  try { domain = new URL(url).hostname; } catch (e) {}
+  if (!domain) throw new Error("ドメイン取得失敗");
+
+  const { mappings } = await fetchDomMappings(domain);
+  if (!mappings || mappings.length === 0) {
+    throw new Error(`${domain} のマッピング未登録（/admin/dom-mapping で設定）`);
+  }
+
+  const items = mappings
+    .filter((m) => m.is_active !== 0 && record[m.questionnaire_field] != null && record[m.questionnaire_field] !== "")
+    .map((m) => ({ field: m.questionnaire_field, xpath: m.xpath, value: String(record[m.questionnaire_field]) }));
+
+  if (items.length === 0) {
+    throw new Error("転写対象の値が空");
+  }
+
+  let results;
+  try {
+    const out = await chrome.scripting.executeScript({
+      target: { tabId: tab.id, allFrames: true },
+      func: injectFillByXPaths,
+      args: [items],
+    });
+    // allFrames で複数結果が返る → 最初に成功した結果を集約
+    const merged = new Map();
+    for (const frame of out) {
+      for (const r of (frame.result || [])) {
+        if (!merged.has(r.field) || (!merged.get(r.field).ok && r.ok)) merged.set(r.field, r);
+      }
+    }
+    results = Array.from(merged.values());
+  } catch (e) {
+    throw new Error(`スクリプト注入失敗: ${e.message}`);
+  }
+
+  const okCount = results.filter((r) => r.ok).length;
+  const ngList = results.filter((r) => !r.ok);
+  if (debugMode) log("info", "transfer", `domain=${domain} ok=${okCount}/${results.length}`);
+  if (ngList.length > 0) {
+    log("warn", "transfer-partial", ngList.map((r) => `${r.field}:${r.reason}`).join(", "));
+  }
+  return { ok: okCount, total: results.length, ngList };
+}
+
 // ---- Questionnaire ----
 async function fetchQuestionnaires() {
   const errEl = $("questionnaireError");
@@ -413,6 +530,33 @@ function makeQuestionnaireCard(r, roleLabel) {
     badge.textContent = roleLabel;
     head.appendChild(badge);
   }
+
+  const transferBtn = document.createElement("button");
+  transferBtn.type = "button";
+  transferBtn.className = "q-transfer-btn";
+  transferBtn.textContent = "転写";
+  transferBtn.title = "アクティブタブのフォームに転写";
+  transferBtn.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    transferBtn.disabled = true;
+    transferBtn.textContent = "...";
+    try {
+      const result = await transferToActiveTab(r);
+      if (result.ngList.length === 0) {
+        showToast(`転写: ${result.ok}/${result.total} 件`);
+      } else {
+        showToast(`一部失敗: ${result.ok}/${result.total} 件 (詳細はログ)`, true);
+      }
+      transferBtn.textContent = "✓";
+      setTimeout(() => { transferBtn.textContent = "転写"; transferBtn.disabled = false; }, 1500);
+    } catch (err) {
+      showToast(err.message, true);
+      log("err", "transfer", err.message);
+      transferBtn.textContent = "転写";
+      transferBtn.disabled = false;
+    }
+  });
+  head.appendChild(transferBtn);
 
   const date = document.createElement("span");
   date.className = "q-card__date";
