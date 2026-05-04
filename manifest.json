@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "ぞうさん薬局 - 薬名転写",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "お薬手帳から抽出した医薬品名を他タブの入力欄に転写、新患アンケートを薬局システムへ一括転写（DOMマッピング設定経由）",
   "permissions": ["scripting", "sidePanel", "storage", "tabs"],
-  "host_permissions": ["https://okusuri.duckdns.org/*", "<all_urls>"],
+  "host_permissions": ["https://okusuri.duckdns.org/*", "https://*/*"],
   "action": {
     "default_title": "ぞうさん薬局 薬名転写"
   },
