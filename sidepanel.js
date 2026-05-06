@@ -297,18 +297,56 @@ document.querySelectorAll(".tab").forEach((t) => {
   });
 });
 
-// ---- DOM mapping cache (per domain) ----
-const domMappingsCache = new Map(); // domain -> {mappings, fields}
+// ---- 多店舗テナント ----
+let currentTenant = "huchinobe"; // default
+let tenantList = [];             // [{key, store_name}]
+
+async function loadTenants() {
+  try {
+    const res = await fetch(`${API_BASE}/api/tenants`, { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    tenantList = data.tenants || [];
+  } catch (e) {
+    log("err", "loadTenants", e.message);
+    // フォールバック: huchinobe のみ
+    tenantList = [{ key: "huchinobe", store_name: "ぞうさん薬局淵野辺店" }];
+  }
+}
+
+function renderTenantSelect() {
+  const sel = $("tenantSelect");
+  if (!sel) return;
+  sel.innerHTML = "";
+  for (const t of tenantList) {
+    const opt = document.createElement("option");
+    opt.value = t.key;
+    opt.textContent = t.store_name;
+    sel.appendChild(opt);
+  }
+  sel.value = currentTenant;
+}
+
+async function setCurrentTenant(key) {
+  currentTenant = key;
+  try { await chrome.storage.local.set({ currentTenant: key }); } catch {}
+  domMappingsCache.clear();
+  fetchQuestionnaires();
+}
+
+// ---- DOM mapping cache (per tenant + domain) ----
+const domMappingsCache = new Map(); // "tenant|domain" -> {mappings, fields}
 
 async function fetchDomMappings(domain) {
   if (!domain) return { mappings: [], fields: [] };
-  if (domMappingsCache.has(domain)) return domMappingsCache.get(domain);
+  const cacheKey = `${currentTenant}|${domain}`;
+  if (domMappingsCache.has(cacheKey)) return domMappingsCache.get(cacheKey);
   try {
-    const res = await fetch(`${API_BASE}/api/huchinobe/dom-mappings?domain=${encodeURIComponent(domain)}`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/api/${encodeURIComponent(currentTenant)}/dom-mappings?domain=${encodeURIComponent(domain)}`, { cache: "no-store" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     const result = { mappings: data.mappings || [], fields: data.fields || [] };
-    domMappingsCache.set(domain, result);
+    domMappingsCache.set(cacheKey, result);
     return result;
   } catch (e) {
     log("err", "fetchDomMappings", e.message);
@@ -439,12 +477,12 @@ async function transferToActiveTab(record) {
 async function fetchQuestionnaires() {
   const errEl = $("questionnaireError");
   try {
-    const res = await fetch(`${API_BASE}/api/huchinobe/list`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/api/${encodeURIComponent(currentTenant)}/list`, { cache: "no-store" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     renderQuestionnaires(data.records || []);
     errEl.classList.add("hidden");
-    if (debugMode) log("info", "fetchQuestionnaires", `count=${(data.records || []).length}`);
+    if (debugMode) log("info", "fetchQuestionnaires", `tenant=${currentTenant} count=${(data.records || []).length}`);
   } catch (e) {
     errEl.classList.remove("hidden");
     errEl.textContent = `アンケート取得失敗: ${e.message}`;
@@ -631,14 +669,24 @@ window.addEventListener("unhandledrejection", (e) => {
 // ---- Init ----
 async function init() {
   try {
-    const stored = await chrome.storage.local.get(["logs", "debugMode"]);
+    const stored = await chrome.storage.local.get(["logs", "debugMode", "currentTenant"]);
     logs = stored.logs || [];
     debugMode = !!stored.debugMode;
     $("debugToggle").checked = debugMode;
+    if (stored.currentTenant) currentTenant = stored.currentTenant;
     renderLogs();
   } catch (e) {
     log("err", "init storage", e.message);
   }
+
+  // テナント一覧を取得 → ドロップダウン構築
+  await loadTenants();
+  if (!tenantList.find((t) => t.key === currentTenant)) {
+    currentTenant = (tenantList[0] || {}).key || "huchinobe";
+  }
+  renderTenantSelect();
+  $("tenantSelect").addEventListener("change", (e) => setCurrentTenant(e.target.value));
+
   await fetchRecords();
   setInterval(fetchRecords, 30000);
 }

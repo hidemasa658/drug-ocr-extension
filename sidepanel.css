@@ -219,6 +219,33 @@ main { padding: 8px 12px 32px; }
 .q-transfer-btn:hover { opacity: 0.85; }
 .q-transfer-btn:disabled { opacity: 0.5; cursor: wait; }
 
+.tenant-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  margin-bottom: 6px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.tenant-bar label {
+  font-size: 11px;
+  color: var(--text-2);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.tenant-bar select {
+  flex: 1;
+  font-size: 12px;
+  padding: 4px 6px;
+  border: 1px solid var(--border-strong, rgba(15,23,42,0.14));
+  border-radius: 4px;
+  background: var(--card);
+  color: var(--text);
+  font-family: inherit;
+}
+
 .history-card {
   background: var(--card);
   border: 1px solid var(--border);
