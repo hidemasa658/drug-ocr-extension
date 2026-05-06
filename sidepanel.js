@@ -388,16 +388,37 @@ async function transferToActiveTab(record) {
 
   let results;
   try {
-    const out = await chrome.scripting.executeScript({
-      target: { tabId: tab.id, allFrames: true },
+    // Pass 1: メインフレームのみ（広告iframe等への意図せぬ書込を回避）
+    const out1 = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
       func: injectFillByXPaths,
       args: [items],
     });
-    // allFrames で複数結果が返る → 最初に成功した結果を集約
     const merged = new Map();
-    for (const frame of out) {
+    for (const frame of out1) {
       for (const r of (frame.result || [])) {
         if (!merged.has(r.field) || (!merged.get(r.field).ok && r.ok)) merged.set(r.field, r);
+      }
+    }
+
+    // Pass 2: メインで未解決のフィールドだけ全iframeで再試行
+    const remainingItems = items.filter((it) => !(merged.get(it.field) || {}).ok);
+    if (remainingItems.length > 0) {
+      try {
+        const out2 = await chrome.scripting.executeScript({
+          target: { tabId: tab.id, allFrames: true, frameIds: undefined },
+          func: injectFillByXPaths,
+          args: [remainingItems],
+        });
+        for (const frame of out2) {
+          if (frame.frameId === 0) continue; // メインは Pass 1 で評価済み
+          for (const r of (frame.result || [])) {
+            if (!merged.has(r.field) || (!merged.get(r.field).ok && r.ok)) merged.set(r.field, r);
+          }
+        }
+      } catch (e2) {
+        // iframe注入失敗は無視（メインで成功した分は保持）
+        if (debugMode) log("warn", "iframe-inject", e2.message);
       }
     }
     results = Array.from(merged.values());
