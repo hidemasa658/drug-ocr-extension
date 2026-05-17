@@ -716,7 +716,11 @@ async function init() {
   }
 
   await fetchRecords();
-  setInterval(fetchRecords, 30000);
+  // 15秒ごとに自動更新（アクティブタブのみ取得）
+  setInterval(() => {
+    if (currentTab === "ocr") fetchRecords();
+    else if (currentTab === "questionnaire" && currentTenant) fetchQuestionnaires();
+  }, 15000);
 }
 
 init();
