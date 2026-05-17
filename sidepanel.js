@@ -281,7 +281,7 @@ $("refreshBtn").addEventListener("click", () => {
 });
 
 // ---- Tabs ----
-let currentTab = "ocr";
+let currentTab = "questionnaire";
 let questionnaireLoaded = false;
 
 document.querySelectorAll(".tab").forEach((t) => {
@@ -716,6 +716,10 @@ async function init() {
   }
 
   await fetchRecords();
+  if (currentTenant) {
+    fetchQuestionnaires();
+    questionnaireLoaded = true;
+  }
   // 15秒ごとに自動更新（アクティブタブのみ取得）
   setInterval(() => {
     if (currentTab === "ocr") fetchRecords();

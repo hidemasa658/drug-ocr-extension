@@ -23,17 +23,17 @@
   </div>
 
   <nav class="tabs">
-    <button type="button" class="tab active" data-tab="ocr">薬名</button>
-    <button type="button" class="tab" data-tab="questionnaire">新患アンケート</button>
+    <button type="button" class="tab" data-tab="ocr">薬名</button>
+    <button type="button" class="tab active" data-tab="questionnaire">新患アンケート</button>
   </nav>
 
   <main>
     <div id="status" class="status hidden"></div>
     <div id="error" class="error hidden"></div>
-    <div class="tab-panel active" id="tab-ocr">
+    <div class="tab-panel" id="tab-ocr">
       <div id="history"></div>
     </div>
-    <div class="tab-panel" id="tab-questionnaire">
+    <div class="tab-panel active" id="tab-questionnaire">
       <div id="questionnaireError" class="error hidden"></div>
       <div id="questionnaireList"></div>
     </div>
