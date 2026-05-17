@@ -659,6 +659,7 @@ function makeQuestionnaireCard(r, roleLabel) {
   body.className = "q-card__body";
   const fields = [
     ["電話", r.phone],
+    ["郵便番号", r.zipcode],
     ["住所", r.address],
     ["体重", r.weight],
     ["疾患", r.disease],
