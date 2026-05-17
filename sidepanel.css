@@ -219,31 +219,72 @@ main { padding: 8px 12px 32px; }
 .q-transfer-btn:hover { opacity: 0.85; }
 .q-transfer-btn:disabled { opacity: 0.5; cursor: wait; }
 
-.tenant-bar {
+.header__store {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--primary, #0ea5e9);
+  background: var(--primary-soft, #e0f2fe);
+  padding: 3px 8px;
+  border-radius: 10px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+.header__store:empty { display: none; }
+
+/* 店舗選択モーダル */
+.store-picker-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.6);
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  margin-bottom: 6px;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
 }
-.tenant-bar label {
-  font-size: 11px;
-  color: var(--text-2);
-  font-weight: 600;
-  flex-shrink: 0;
-}
-.tenant-bar select {
-  flex: 1;
-  font-size: 12px;
-  padding: 4px 6px;
-  border: 1px solid var(--border-strong, rgba(15,23,42,0.14));
-  border-radius: 4px;
+.store-picker-modal {
   background: var(--card);
+  border-radius: 12px;
+  padding: 20px;
+  max-width: 320px;
+  width: 100%;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+}
+.store-picker-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0 0 8px;
   color: var(--text);
+}
+.store-picker-sub {
+  font-size: 12px;
+  color: var(--text-2);
+  margin: 0 0 16px;
+  line-height: 1.5;
+}
+.store-picker-sub strong {
+  color: var(--danger, #ef4444);
+}
+.store-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.store-picker-btn {
+  background: var(--card);
+  border: 1px solid var(--border-strong, rgba(15,23,42,0.14));
+  border-radius: 8px;
+  padding: 10px 14px;
   font-family: inherit;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  transition: background 100ms, border-color 100ms;
+}
+.store-picker-btn:hover {
+  background: var(--primary-soft, #e0f2fe);
+  border-color: var(--primary, #0ea5e9);
 }
 
 .history-card {

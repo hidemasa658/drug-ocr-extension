@@ -8,9 +8,19 @@
 <body>
   <header class="header">
     <img class="header__logo" src="logo_yoko.png" alt="ぞうさん薬局">
+    <span id="storeLabel" class="header__store"></span>
     <button id="refreshBtn" class="icon-btn" title="更新">↻</button>
     <button id="settingsBtn" class="icon-btn" title="設定/ログ">⚙</button>
   </header>
+
+  <!-- 初回起動時の店舗選択モーダル（強制） -->
+  <div id="storePickerOverlay" class="store-picker-overlay hidden">
+    <div class="store-picker-modal">
+      <h2 class="store-picker-title">所属店舗を選択</h2>
+      <p class="store-picker-sub">このPCで閲覧する店舗を選んでください。<br><strong>選択後は変更できません</strong></p>
+      <div id="storePickerList" class="store-picker-list"></div>
+    </div>
+  </div>
 
   <nav class="tabs">
     <button type="button" class="tab active" data-tab="ocr">薬名</button>
@@ -24,10 +34,6 @@
       <div id="history"></div>
     </div>
     <div class="tab-panel" id="tab-questionnaire">
-      <div class="tenant-bar">
-        <label for="tenantSelect">店舗</label>
-        <select id="tenantSelect"></select>
-      </div>
       <div id="questionnaireError" class="error hidden"></div>
       <div id="questionnaireList"></div>
     </div>

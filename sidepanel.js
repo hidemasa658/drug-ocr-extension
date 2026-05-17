@@ -297,9 +297,13 @@ document.querySelectorAll(".tab").forEach((t) => {
   });
 });
 
-// ---- 多店舗テナント ----
-let currentTenant = "huchinobe"; // default
+// ---- 多店舗テナント（PC毎固定、一度選択したら変更不可） ----
+let currentTenant = null;        // 未選択は null
 let tenantList = [];             // [{key, store_name}]
+
+function compactStoreName(fullName) {
+  return (fullName || "").replace(/^ぞうさん薬局/, "");
+}
 
 async function loadTenants() {
   try {
@@ -309,29 +313,43 @@ async function loadTenants() {
     tenantList = data.tenants || [];
   } catch (e) {
     log("err", "loadTenants", e.message);
-    // フォールバック: huchinobe のみ
-    tenantList = [{ key: "huchinobe", store_name: "ぞうさん薬局淵野辺店" }];
+    tenantList = [];
   }
 }
 
-function renderTenantSelect() {
-  const sel = $("tenantSelect");
-  if (!sel) return;
-  sel.innerHTML = "";
+function showStorePicker() {
+  const overlay = $("storePickerOverlay");
+  const list = $("storePickerList");
+  list.innerHTML = "";
   for (const t of tenantList) {
-    const opt = document.createElement("option");
-    opt.value = t.key;
-    opt.textContent = t.store_name;
-    sel.appendChild(opt);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "store-picker-btn";
+    btn.textContent = compactStoreName(t.store_name);
+    btn.addEventListener("click", () => pickStore(t.key));
+    list.appendChild(btn);
   }
-  sel.value = currentTenant;
+  overlay.classList.remove("hidden");
 }
 
-async function setCurrentTenant(key) {
+function hideStorePicker() {
+  $("storePickerOverlay").classList.add("hidden");
+}
+
+async function pickStore(key) {
   currentTenant = key;
   try { await chrome.storage.local.set({ currentTenant: key }); } catch {}
-  domMappingsCache.clear();
+  updateStoreLabel();
+  hideStorePicker();
   fetchQuestionnaires();
+}
+
+function updateStoreLabel() {
+  const el = $("storeLabel");
+  if (!el) return;
+  if (!currentTenant) { el.textContent = ""; return; }
+  const t = tenantList.find((x) => x.key === currentTenant);
+  el.textContent = t ? compactStoreName(t.store_name) : currentTenant;
 }
 
 // ---- DOM mapping cache (per tenant + domain) ----
@@ -476,6 +494,11 @@ async function transferToActiveTab(record) {
 // ---- Questionnaire ----
 async function fetchQuestionnaires() {
   const errEl = $("questionnaireError");
+  if (!currentTenant) {
+    errEl.classList.remove("hidden");
+    errEl.textContent = "店舗が選択されていません";
+    return;
+  }
   try {
     const res = await fetch(`${API_BASE}/api/${encodeURIComponent(currentTenant)}/list`, { cache: "no-store" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -647,7 +670,6 @@ function makeQuestionnaireCard(r, roleLabel) {
     ["その他相談", r.consultation],
     ["妊娠・授乳", r.female],
     ["かかりつけ", r.kakaritsuke],
-    ["来局きっかけ", r.kikkake],
   ];
   for (const [k, v] of fields) {
     const row = field(k, v);
@@ -679,13 +701,19 @@ async function init() {
     log("err", "init storage", e.message);
   }
 
-  // テナント一覧を取得 → ドロップダウン構築
+  // テナント一覧を取得
   await loadTenants();
-  if (!tenantList.find((t) => t.key === currentTenant)) {
-    currentTenant = (tenantList[0] || {}).key || "huchinobe";
+
+  // 保存済みテナントの整合性チェック + 未選択ならモーダル強制表示
+  if (currentTenant && !tenantList.find((t) => t.key === currentTenant)) {
+    currentTenant = null;
+    try { await chrome.storage.local.remove("currentTenant"); } catch {}
   }
-  renderTenantSelect();
-  $("tenantSelect").addEventListener("change", (e) => setCurrentTenant(e.target.value));
+  if (!currentTenant) {
+    showStorePicker();
+  } else {
+    updateStoreLabel();
+  }
 
   await fetchRecords();
   setInterval(fetchRecords, 30000);
