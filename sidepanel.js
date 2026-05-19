@@ -500,7 +500,7 @@ async function fetchQuestionnaires() {
     return;
   }
   try {
-    const res = await fetch(`${API_BASE}/api/${encodeURIComponent(currentTenant)}/list`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/api/${encodeURIComponent(currentTenant)}/list?limit=30`, { cache: "no-store" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     renderQuestionnaires(data.records || []);
