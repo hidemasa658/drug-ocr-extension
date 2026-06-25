@@ -352,6 +352,29 @@ function updateStoreLabel() {
   el.textContent = t ? compactStoreName(t.store_name) : currentTenant;
 }
 
+// ---- 転写時に固定で押すボタン (ドメインパターン -> XPath配列) ----
+// 患者基礎情報モーダルのうち、アンケートに項目が無く既定値で良いラジオボタンを
+// 毎回必ず押す。固定文字列なので外字エスケープ等の心配なし。
+const FORCE_CLICK_BY_DOMAIN_PATTERN = [
+  {
+    pattern: /\.solamichi\.jp$/i,
+    xpaths: [
+      "/body[1]/div[2]/div[1]/div[2]/table[1]/tbody[1]/tr[1]/td[3]/span[1]/label[1]",
+      "/body[1]/div[2]/div[1]/div[2]/table[2]/tbody[1]/tr[1]/td[3]/span[1]/label[1]",
+      "//*[@id=\"medicine-take-state-button-good\"]",
+      "//*[@id=\"remain-medicine-button-unknown\"]",
+      "//*[@id=\"physical-condition-button-change\"]",
+    ],
+  },
+];
+
+function forceClickXpathsFor(domain) {
+  for (const cfg of FORCE_CLICK_BY_DOMAIN_PATTERN) {
+    if (cfg.pattern.test(domain)) return cfg.xpaths;
+  }
+  return [];
+}
+
 // ---- DOM mapping cache (per tenant + domain) ----
 const domMappingsCache = new Map(); // "tenant|domain" -> {mappings, fields}
 
@@ -370,6 +393,24 @@ async function fetchDomMappings(domain) {
     log("err", "fetchDomMappings", e.message);
     return { mappings: [], fields: [] };
   }
+}
+
+// 対象タブで XPath の要素を click する（タブ内で実行される関数）
+// label をクリックすれば中の radio/checkbox が選択される一般的な挙動を狙う
+function injectClickByXPaths(xpaths) {
+  const results = [];
+  for (const xp of xpaths) {
+    try {
+      const xr = document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+      const el = xr.singleNodeValue;
+      if (!el) { results.push({ field: `__force_click__:${xp}`, ok: false, reason: "要素未発見" }); continue; }
+      el.click();
+      results.push({ field: `__force_click__:${xp}`, ok: true });
+    } catch (e) {
+      results.push({ field: `__force_click__:${xp}`, ok: false, reason: String(e).slice(0, 100) });
+    }
+  }
+  return results;
 }
 
 // 対象タブで XPath に値を書き込む（タブ内で実行される関数）
@@ -480,6 +521,33 @@ async function transferToActiveTab(record) {
     results = Array.from(merged.values());
   } catch (e) {
     throw new Error(`スクリプト注入失敗: ${e.message}`);
+  }
+
+  // 固定クリック (ドメインに紐づく既定値のラジオ等)。失敗してもメイン転写の成功を妨げない。
+  const forceXpaths = forceClickXpathsFor(domain);
+  if (forceXpaths.length > 0) {
+    try {
+      const outClick = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: injectClickByXPaths,
+        args: [forceXpaths],
+      });
+      const seenXp = new Set();
+      for (const frame of outClick) {
+        for (const r of (frame.result || [])) {
+          // ドメイン内でメイン+iframe両方ヒットしたら成功優先で1つにまとめる
+          if (seenXp.has(r.field) && r.ok) {
+            const prev = results.find((x) => x.field === r.field);
+            if (prev && !prev.ok) Object.assign(prev, r);
+            continue;
+          }
+          if (!seenXp.has(r.field)) results.push(r);
+          seenXp.add(r.field);
+        }
+      }
+    } catch (eClick) {
+      if (debugMode) log("warn", "force-click", eClick.message);
+    }
   }
 
   const okCount = results.filter((r) => r.ok).length;
