@@ -607,6 +607,12 @@ function parseAnswer(rawValue) {
   return s.split(/[,、]/).map((x) => x.trim()).filter(Boolean);
 }
 
+// "xp1;xp2;xp3" を ["xp1","xp2","xp3"] に展開。1値に対し複数要素クリックを許容するため。
+function expandXpaths(xp) {
+  if (!xp) return [];
+  return String(xp).split(";").map((s) => s.trim()).filter(Boolean);
+}
+
 function buildPerValueTasks(mappings, record) {
   const clickItems = [];
   const fillItems = [];
@@ -620,16 +626,22 @@ function buildPerValueTasks(mappings, record) {
     byField.set(m.questionnaire_field, arr);
   }
 
+  const pushClicks = (fieldKey, xpaths) => {
+    xpaths.forEach((xp, i) => {
+      const key = xpaths.length > 1 ? `${fieldKey}#${i + 1}` : fieldKey;
+      clickItems.push({ field: key, xpath: xp });
+    });
+  };
+
   for (const [field, rows] of byField) {
     const defaultRow = rows.find((r) => !r.value);
     const valueRows = rows.filter((r) => r.value);
     const parts = parseAnswer(record[field]);
+    const noneXpaths = expandXpaths(defaultRow && defaultRow.radio_no_xpath);
 
     // 空回答: radio_no_xpath を押す
     if (parts.length === 0) {
-      if (defaultRow && defaultRow.radio_no_xpath) {
-        clickItems.push({ field: `${field}:__none__`, xpath: defaultRow.radio_no_xpath });
-      }
+      if (noneXpaths.length > 0) pushClicks(`${field}:__none__`, noneXpaths);
       continue;
     }
 
@@ -637,15 +649,15 @@ function buildPerValueTasks(mappings, record) {
     let pushedNone = false;
     for (const p of parts) {
       if (isNoneValue(p)) {
-        if (defaultRow && defaultRow.radio_no_xpath && !pushedNone) {
-          clickItems.push({ field: `${field}:__none__`, xpath: defaultRow.radio_no_xpath });
+        if (!pushedNone && noneXpaths.length > 0) {
+          pushClicks(`${field}:__none__`, noneXpaths);
           pushedNone = true;
         }
         continue;
       }
       const vRow = valueRows.find((r) => r.value === p);
       if (vRow) {
-        clickItems.push({ field: `${field}:${p}`, xpath: vRow.xpath });
+        pushClicks(`${field}:${p}`, expandXpaths(vRow.xpath));
       } else {
         unmatched.push(p);
       }
