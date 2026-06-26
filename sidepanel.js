@@ -443,19 +443,71 @@ async function fetchDomMappings(domain) {
   }
 }
 
-// 対象タブで items 各要素を click する（タブ内で実行される関数）
-// items: [{ field, xpath }]
-function injectClickByItems(items) {
+// 対象タブで items を実行する（タブ内で実行される関数）
+// items: [{ field, xpath, text? }]
+//   - 対象が INPUT / TEXTAREA で text が指定されている → fill (同じxpathに複数回くるとカンマ連結)
+//   - SELECT で text が指定されている → option 一致を value/label で探して set
+//   - それ以外 → click
+function injectByItems(items) {
   const results = [];
+  const fillBuffer = new Map(); // xpath -> { el, texts: [], fields: [] }
   for (const it of items) {
     try {
       const xr = document.evaluate(it.xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
       const el = xr.singleNodeValue;
       if (!el) { results.push({ field: it.field, ok: false, reason: "要素未発見" }); continue; }
-      el.click();
-      results.push({ field: it.field, ok: true });
+      const tag = el.tagName;
+      const isInput = tag === "INPUT" || tag === "TEXTAREA";
+      const isSelect = tag === "SELECT";
+      const isCE = el.isContentEditable;
+      const text = it.text != null ? String(it.text) : "";
+
+      if ((isInput || isCE) && text !== "") {
+        const cur = fillBuffer.get(it.xpath) || { el, texts: [], fields: [] };
+        cur.texts.push(text);
+        cur.fields.push(it.field);
+        fillBuffer.set(it.xpath, cur);
+      } else if (isSelect && text !== "") {
+        let matched = false;
+        for (const opt of el.options) {
+          if (opt.value === text || opt.textContent.trim() === text) {
+            el.value = opt.value; matched = true; break;
+          }
+        }
+        if (!matched) {
+          results.push({ field: it.field, ok: false, reason: `select候補に '${text}' なし` });
+        } else {
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+          results.push({ field: it.field, ok: true });
+        }
+      } else {
+        el.click();
+        results.push({ field: it.field, ok: true });
+      }
     } catch (e) {
       results.push({ field: it.field, ok: false, reason: String(e).slice(0, 100) });
+    }
+  }
+  // fill をマージして一気に流し込む (同じxpath複数回の場合)
+  for (const [_xp, buf] of fillBuffer) {
+    try {
+      const el = buf.el;
+      const merged = buf.texts.join(", ");
+      if (el.isContentEditable) {
+        el.focus();
+        document.execCommand("insertText", false, merged);
+      } else {
+        const proto = Object.getPrototypeOf(el);
+        const desc = Object.getOwnPropertyDescriptor(proto, "value");
+        if (desc && desc.set) desc.set.call(el, merged);
+        else el.value = merged;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      for (const f of buf.fields) results.push({ field: f, ok: true });
+    } catch (e) {
+      for (const f of buf.fields) results.push({ field: f, ok: false, reason: String(e).slice(0, 100) });
     }
   }
   return results;
@@ -523,14 +575,14 @@ async function transferToActiveTab(record) {
     throw new Error(`${domain} のマッピング未登録（/admin/dom-mapping で設定）`);
   }
 
-  const { clickItems, fillItems } = buildPerValueTasks(mappings, record);
+  const { items } = buildPerValueTasks(mappings, record);
 
   // 固定クリック (ドメイン共通既定値) も同じパイプラインで投入
   for (const xp of forceClickXpathsFor(domain)) {
-    clickItems.push({ field: `__force_click__:${xp}`, xpath: xp });
+    items.push({ field: `__force_click__:${xp}`, xpath: xp, text: "" });
   }
 
-  if (clickItems.length === 0 && fillItems.length === 0) {
+  if (items.length === 0) {
     throw new Error("転写対象の値が空");
   }
 
@@ -543,44 +595,24 @@ async function transferToActiveTab(record) {
 
   // --- Pass 1: メインフレーム ---
   try {
-    if (clickItems.length > 0) {
-      const outC = await chrome.scripting.executeScript({
-        target: { tabId: tab.id }, func: injectClickByItems, args: [clickItems],
-      });
-      for (const frame of outC) mergeResults(frame.result || []);
-    }
-    if (fillItems.length > 0) {
-      const outF = await chrome.scripting.executeScript({
-        target: { tabId: tab.id }, func: injectFillByXPaths, args: [fillItems],
-      });
-      for (const frame of outF) mergeResults(frame.result || []);
-    }
+    const out1 = await chrome.scripting.executeScript({
+      target: { tabId: tab.id }, func: injectByItems, args: [items],
+    });
+    for (const frame of out1) mergeResults(frame.result || []);
   } catch (e) {
     throw new Error(`スクリプト注入失敗: ${e.message}`);
   }
 
   // --- Pass 2: 未解決を全 iframe で再試行 ---
-  const remainingClicks = clickItems.filter((it) => !(merged.get(it.field) || {}).ok);
-  const remainingFills = fillItems.filter((it) => !(merged.get(it.field) || {}).ok);
-  if (remainingClicks.length + remainingFills.length > 0) {
+  const remaining = items.filter((it) => !(merged.get(it.field) || {}).ok);
+  if (remaining.length > 0) {
     try {
-      if (remainingClicks.length > 0) {
-        const out2c = await chrome.scripting.executeScript({
-          target: { tabId: tab.id, allFrames: true }, func: injectClickByItems, args: [remainingClicks],
-        });
-        for (const frame of out2c) {
-          if (frame.frameId === 0) continue;
-          mergeResults(frame.result || []);
-        }
-      }
-      if (remainingFills.length > 0) {
-        const out2f = await chrome.scripting.executeScript({
-          target: { tabId: tab.id, allFrames: true }, func: injectFillByXPaths, args: [remainingFills],
-        });
-        for (const frame of out2f) {
-          if (frame.frameId === 0) continue;
-          mergeResults(frame.result || []);
-        }
+      const out2 = await chrome.scripting.executeScript({
+        target: { tabId: tab.id, allFrames: true }, func: injectByItems, args: [remaining],
+      });
+      for (const frame of out2) {
+        if (frame.frameId === 0) continue;
+        mergeResults(frame.result || []);
       }
     } catch (e2) {
       if (debugMode) log("warn", "iframe-inject", e2.message);
@@ -614,8 +646,8 @@ function expandXpaths(xp) {
 }
 
 function buildPerValueTasks(mappings, record) {
-  const clickItems = [];
-  const fillItems = [];
+  // 統合 items: クリック/フィルを 1リスト に。要素タイプは inject側で判定。
+  const items = [];
 
   // questionnaire_field 単位でグルーピング
   const byField = new Map();
@@ -626,10 +658,10 @@ function buildPerValueTasks(mappings, record) {
     byField.set(m.questionnaire_field, arr);
   }
 
-  const pushClicks = (fieldKey, xpaths) => {
+  const pushItems = (fieldKey, xpaths, text) => {
     xpaths.forEach((xp, i) => {
       const key = xpaths.length > 1 ? `${fieldKey}#${i + 1}` : fieldKey;
-      clickItems.push({ field: key, xpath: xp });
+      items.push({ field: key, xpath: xp, text: text || "" });
     });
   };
 
@@ -639,9 +671,9 @@ function buildPerValueTasks(mappings, record) {
     const parts = parseAnswer(record[field]);
     const noneXpaths = expandXpaths(defaultRow && defaultRow.radio_no_xpath);
 
-    // 空回答: radio_no_xpath を押す
+    // 空回答: radio_no_xpath を押す (text は不要なので click)
     if (parts.length === 0) {
-      if (noneXpaths.length > 0) pushClicks(`${field}:__none__`, noneXpaths);
+      if (noneXpaths.length > 0) pushItems(`${field}:__none__`, noneXpaths, "");
       continue;
     }
 
@@ -650,14 +682,15 @@ function buildPerValueTasks(mappings, record) {
     for (const p of parts) {
       if (isNoneValue(p)) {
         if (!pushedNone && noneXpaths.length > 0) {
-          pushClicks(`${field}:__none__`, noneXpaths);
+          pushItems(`${field}:__none__`, noneXpaths, "");
           pushedNone = true;
         }
         continue;
       }
       const vRow = valueRows.find((r) => r.value === p);
       if (vRow) {
-        pushClicks(`${field}:${p}`, expandXpaths(vRow.xpath));
+        // 値を text として渡す: 要素が text input なら fill、checkboxなら click
+        pushItems(`${field}:${p}`, expandXpaths(vRow.xpath), p);
       } else {
         unmatched.push(p);
       }
@@ -665,11 +698,13 @@ function buildPerValueTasks(mappings, record) {
 
     // 未対応の値はデフォルト行のテキスト入力に流す
     if (unmatched.length > 0 && defaultRow && defaultRow.xpath) {
-      fillItems.push({ field, xpath: defaultRow.xpath, value: unmatched.join(", ") });
+      for (const xp of expandXpaths(defaultRow.xpath)) {
+        items.push({ field: `${field}:__unmatched__`, xpath: xp, text: unmatched.join(", ") });
+      }
     }
   }
 
-  return { clickItems, fillItems };
+  return { items };
 }
 
 // ---- Questionnaire ----
