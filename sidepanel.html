@@ -45,6 +45,17 @@
       <button id="settingsClose" class="icon-btn">×</button>
     </div>
     <div class="settings__body">
+      <div class="token-section">
+        <label for="apiTokenInput" style="font-size:12px;font-weight:bold;display:block;margin-bottom:4px;">APIトークン</label>
+        <div style="display:flex;gap:4px;align-items:center;">
+          <input type="password" id="apiTokenInput" placeholder="管理者から受け取ったtokenを貼り付け" style="flex:1;font-family:monospace;font-size:11px;padding:4px;border:1px solid #ccc;border-radius:3px;">
+          <button id="apiTokenSave" class="icon-btn" style="font-size:11px;padding:4px 8px;">保存</button>
+        </div>
+        <div id="apiTokenStatus" style="font-size:10px;color:#666;margin-top:4px;">未設定（店舗Wi-Fi等のIP許可リスト外PCでは必須）</div>
+      </div>
+
+      <hr style="margin:10px 0;border:none;border-top:1px solid #eee;">
+
       <label class="switch-row">
         <input type="checkbox" id="debugToggle">
         <span>デバッグモード（console に詳細ログ）</span>

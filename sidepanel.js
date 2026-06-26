@@ -5,6 +5,54 @@ const $ = (id) => document.getElementById(id);
 
 let logs = [];
 let debugMode = false;
+let apiToken = ""; // 起動時に chrome.storage.local から復元
+
+// ---- API fetch (x-extension-token ヘッダ自動付与 + 403 ハンドリング) ----
+async function apiFetch(url, options = {}) {
+  const headers = { ...(options.headers || {}) };
+  if (apiToken) headers["x-extension-token"] = apiToken;
+  const res = await fetch(url, { ...options, headers });
+  if (res.status === 403) {
+    if (!apiToken) {
+      log("warn", "api-403", `${url}\nAPIトークン未設定。設定パネルで貼り付けてください`);
+    } else {
+      log("warn", "api-403", `${url}\nトークンが無効。管理者に新トークンを依頼してください`);
+    }
+  }
+  return res;
+}
+
+async function loadApiToken() {
+  try {
+    const s = await chrome.storage.local.get(["apiToken"]);
+    apiToken = (s.apiToken || "").trim();
+  } catch (e) {
+    apiToken = "";
+  }
+  renderTokenStatus();
+}
+
+async function saveApiToken(t) {
+  apiToken = (t || "").trim();
+  try { await chrome.storage.local.set({ apiToken }); } catch {}
+  renderTokenStatus();
+}
+
+function renderTokenStatus() {
+  const el = $("apiTokenStatus");
+  const input = $("apiTokenInput");
+  if (!el || !input) return;
+  // 入力欄は今のtokenの長さだけマスク表示
+  if (apiToken) {
+    input.value = "•".repeat(Math.min(apiToken.length, 32));
+    el.textContent = `保存済 (長さ ${apiToken.length})`;
+    el.style.color = "#2e7d32";
+  } else {
+    input.value = "";
+    el.textContent = "未設定（店舗Wi-Fi等のIP許可リスト外PCでは必須）";
+    el.style.color = "#666";
+  }
+}
 
 // ---- Logging ----
 function log(level, message, data) {
@@ -54,7 +102,7 @@ function showToast(msg, err) {
 // ---- Fetch ----
 async function fetchRecords() {
   try {
-    const res = await fetch(`${API_BASE}/records`, { cache: "no-store" });
+    const res = await apiFetch(`${API_BASE}/records`, { cache: "no-store" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     renderHistory(data.records || []);
@@ -307,7 +355,7 @@ function compactStoreName(fullName) {
 
 async function loadTenants() {
   try {
-    const res = await fetch(`${API_BASE}/api/tenants`, { cache: "no-store" });
+    const res = await apiFetch(`${API_BASE}/api/tenants`, { cache: "no-store" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     tenantList = data.tenants || [];
@@ -383,7 +431,7 @@ async function fetchDomMappings(domain) {
   const cacheKey = `${currentTenant}|${domain}`;
   if (domMappingsCache.has(cacheKey)) return domMappingsCache.get(cacheKey);
   try {
-    const res = await fetch(`${API_BASE}/api/${encodeURIComponent(currentTenant)}/dom-mappings?domain=${encodeURIComponent(domain)}`, { cache: "no-store" });
+    const res = await apiFetch(`${API_BASE}/api/${encodeURIComponent(currentTenant)}/dom-mappings?domain=${encodeURIComponent(domain)}`, { cache: "no-store" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     const result = { mappings: data.mappings || [], fields: data.fields || [] };
@@ -621,7 +669,7 @@ async function fetchQuestionnaires() {
     return;
   }
   try {
-    const res = await fetch(`${API_BASE}/api/${encodeURIComponent(currentTenant)}/list?limit=30`, { cache: "no-store" });
+    const res = await apiFetch(`${API_BASE}/api/${encodeURIComponent(currentTenant)}/list?limit=30`, { cache: "no-store" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     renderQuestionnaires(data.records || []);
@@ -821,6 +869,30 @@ async function init() {
     renderLogs();
   } catch (e) {
     log("err", "init storage", e.message);
+  }
+
+  // APIトークンを復元 + 保存ボタン配線
+  await loadApiToken();
+  const tokenInput = $("apiTokenInput");
+  const tokenSave = $("apiTokenSave");
+  if (tokenSave && tokenInput) {
+    tokenInput.addEventListener("focus", () => {
+      // マスク表示中なら入力時にクリアして実値入力可能に
+      if (tokenInput.value && /^•+$/.test(tokenInput.value)) tokenInput.value = "";
+    });
+    tokenSave.addEventListener("click", async () => {
+      const v = tokenInput.value.trim();
+      if (!v) {
+        await saveApiToken("");
+        showToast("APIトークンをクリアしました");
+        return;
+      }
+      if (/^•+$/.test(v)) { showToast("変更なし"); return; }
+      await saveApiToken(v);
+      showToast(`APIトークン保存 (長さ ${apiToken.length})`);
+      await loadTenants();  // 403で空だった場合は再取得
+      if (!currentTenant && tenantList.length > 0) showStorePicker();
+    });
   }
 
   // テナント一覧を取得
