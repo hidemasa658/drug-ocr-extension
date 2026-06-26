@@ -395,19 +395,19 @@ async function fetchDomMappings(domain) {
   }
 }
 
-// 対象タブで XPath の要素を click する（タブ内で実行される関数）
-// label をクリックすれば中の radio/checkbox が選択される一般的な挙動を狙う
-function injectClickByXPaths(xpaths) {
+// 対象タブで items 各要素を click する（タブ内で実行される関数）
+// items: [{ field, xpath }]
+function injectClickByItems(items) {
   const results = [];
-  for (const xp of xpaths) {
+  for (const it of items) {
     try {
-      const xr = document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+      const xr = document.evaluate(it.xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
       const el = xr.singleNodeValue;
-      if (!el) { results.push({ field: `__force_click__:${xp}`, ok: false, reason: "要素未発見" }); continue; }
+      if (!el) { results.push({ field: it.field, ok: false, reason: "要素未発見" }); continue; }
       el.click();
-      results.push({ field: `__force_click__:${xp}`, ok: true });
+      results.push({ field: it.field, ok: true });
     } catch (e) {
-      results.push({ field: `__force_click__:${xp}`, ok: false, reason: String(e).slice(0, 100) });
+      results.push({ field: it.field, ok: false, reason: String(e).slice(0, 100) });
     }
   }
   return results;
@@ -475,81 +475,71 @@ async function transferToActiveTab(record) {
     throw new Error(`${domain} のマッピング未登録（/admin/dom-mapping で設定）`);
   }
 
-  const items = mappings
-    .filter((m) => m.is_active !== 0 && record[m.questionnaire_field] != null && record[m.questionnaire_field] !== "")
-    .map((m) => ({ field: m.questionnaire_field, xpath: m.xpath, value: String(record[m.questionnaire_field]) }));
+  const { clickItems, fillItems } = buildPerValueTasks(mappings, record);
 
-  if (items.length === 0) {
+  // 固定クリック (ドメイン共通既定値) も同じパイプラインで投入
+  for (const xp of forceClickXpathsFor(domain)) {
+    clickItems.push({ field: `__force_click__:${xp}`, xpath: xp });
+  }
+
+  if (clickItems.length === 0 && fillItems.length === 0) {
     throw new Error("転写対象の値が空");
   }
 
-  let results;
-  try {
-    // Pass 1: メインフレームのみ（広告iframe等への意図せぬ書込を回避）
-    const out1 = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: injectFillByXPaths,
-      args: [items],
-    });
-    const merged = new Map();
-    for (const frame of out1) {
-      for (const r of (frame.result || [])) {
-        if (!merged.has(r.field) || (!merged.get(r.field).ok && r.ok)) merged.set(r.field, r);
-      }
+  const merged = new Map();
+  const mergeResults = (arr) => {
+    for (const r of arr) {
+      if (!merged.has(r.field) || (!merged.get(r.field).ok && r.ok)) merged.set(r.field, r);
     }
+  };
 
-    // Pass 2: メインで未解決のフィールドだけ全iframeで再試行
-    const remainingItems = items.filter((it) => !(merged.get(it.field) || {}).ok);
-    if (remainingItems.length > 0) {
-      try {
-        const out2 = await chrome.scripting.executeScript({
-          target: { tabId: tab.id, allFrames: true, frameIds: undefined },
-          func: injectFillByXPaths,
-          args: [remainingItems],
-        });
-        for (const frame of out2) {
-          if (frame.frameId === 0) continue; // メインは Pass 1 で評価済み
-          for (const r of (frame.result || [])) {
-            if (!merged.has(r.field) || (!merged.get(r.field).ok && r.ok)) merged.set(r.field, r);
-          }
-        }
-      } catch (e2) {
-        // iframe注入失敗は無視（メインで成功した分は保持）
-        if (debugMode) log("warn", "iframe-inject", e2.message);
-      }
+  // --- Pass 1: メインフレーム ---
+  try {
+    if (clickItems.length > 0) {
+      const outC = await chrome.scripting.executeScript({
+        target: { tabId: tab.id }, func: injectClickByItems, args: [clickItems],
+      });
+      for (const frame of outC) mergeResults(frame.result || []);
     }
-    results = Array.from(merged.values());
+    if (fillItems.length > 0) {
+      const outF = await chrome.scripting.executeScript({
+        target: { tabId: tab.id }, func: injectFillByXPaths, args: [fillItems],
+      });
+      for (const frame of outF) mergeResults(frame.result || []);
+    }
   } catch (e) {
     throw new Error(`スクリプト注入失敗: ${e.message}`);
   }
 
-  // 固定クリック (ドメインに紐づく既定値のラジオ等)。失敗してもメイン転写の成功を妨げない。
-  const forceXpaths = forceClickXpathsFor(domain);
-  if (forceXpaths.length > 0) {
+  // --- Pass 2: 未解決を全 iframe で再試行 ---
+  const remainingClicks = clickItems.filter((it) => !(merged.get(it.field) || {}).ok);
+  const remainingFills = fillItems.filter((it) => !(merged.get(it.field) || {}).ok);
+  if (remainingClicks.length + remainingFills.length > 0) {
     try {
-      const outClick = await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: injectClickByXPaths,
-        args: [forceXpaths],
-      });
-      const seenXp = new Set();
-      for (const frame of outClick) {
-        for (const r of (frame.result || [])) {
-          // ドメイン内でメイン+iframe両方ヒットしたら成功優先で1つにまとめる
-          if (seenXp.has(r.field) && r.ok) {
-            const prev = results.find((x) => x.field === r.field);
-            if (prev && !prev.ok) Object.assign(prev, r);
-            continue;
-          }
-          if (!seenXp.has(r.field)) results.push(r);
-          seenXp.add(r.field);
+      if (remainingClicks.length > 0) {
+        const out2c = await chrome.scripting.executeScript({
+          target: { tabId: tab.id, allFrames: true }, func: injectClickByItems, args: [remainingClicks],
+        });
+        for (const frame of out2c) {
+          if (frame.frameId === 0) continue;
+          mergeResults(frame.result || []);
         }
       }
-    } catch (eClick) {
-      if (debugMode) log("warn", "force-click", eClick.message);
+      if (remainingFills.length > 0) {
+        const out2f = await chrome.scripting.executeScript({
+          target: { tabId: tab.id, allFrames: true }, func: injectFillByXPaths, args: [remainingFills],
+        });
+        for (const frame of out2f) {
+          if (frame.frameId === 0) continue;
+          mergeResults(frame.result || []);
+        }
+      }
+    } catch (e2) {
+      if (debugMode) log("warn", "iframe-inject", e2.message);
     }
   }
 
+  const results = Array.from(merged.values());
   const okCount = results.filter((r) => r.ok).length;
   const ngList = results.filter((r) => !r.ok);
   if (debugMode) log("info", "transfer", `domain=${domain} ok=${okCount}/${results.length}`);
@@ -557,6 +547,69 @@ async function transferToActiveTab(record) {
     log("warn", "transfer-partial", ngList.map((r) => `${r.field}:${r.reason}`).join(", "));
   }
   return { ok: okCount, total: results.length, ngList };
+}
+
+// ---- マッピングとアンケート回答からクリック/フィルのタスクを作成 ----
+const NONE_VALUE_PATTERNS = /^(特になし|該当なし|摂取なし|なし|未回答|無し)$/;
+function isNoneValue(v) { return NONE_VALUE_PATTERNS.test((v || "").trim()); }
+function parseAnswer(rawValue) {
+  if (rawValue == null) return [];
+  const s = String(rawValue).trim();
+  if (!s) return [];
+  return s.split(/[,、]/).map((x) => x.trim()).filter(Boolean);
+}
+
+function buildPerValueTasks(mappings, record) {
+  const clickItems = [];
+  const fillItems = [];
+
+  // questionnaire_field 単位でグルーピング
+  const byField = new Map();
+  for (const m of mappings) {
+    if (m.is_active === 0) continue;
+    const arr = byField.get(m.questionnaire_field) || [];
+    arr.push(m);
+    byField.set(m.questionnaire_field, arr);
+  }
+
+  for (const [field, rows] of byField) {
+    const defaultRow = rows.find((r) => !r.value);
+    const valueRows = rows.filter((r) => r.value);
+    const parts = parseAnswer(record[field]);
+
+    // 空回答: radio_no_xpath を押す
+    if (parts.length === 0) {
+      if (defaultRow && defaultRow.radio_no_xpath) {
+        clickItems.push({ field: `${field}:__none__`, xpath: defaultRow.radio_no_xpath });
+      }
+      continue;
+    }
+
+    const unmatched = [];
+    let pushedNone = false;
+    for (const p of parts) {
+      if (isNoneValue(p)) {
+        if (defaultRow && defaultRow.radio_no_xpath && !pushedNone) {
+          clickItems.push({ field: `${field}:__none__`, xpath: defaultRow.radio_no_xpath });
+          pushedNone = true;
+        }
+        continue;
+      }
+      const vRow = valueRows.find((r) => r.value === p);
+      if (vRow) {
+        clickItems.push({ field: `${field}:${p}`, xpath: vRow.xpath });
+      } else {
+        unmatched.push(p);
+      }
+    }
+
+    // 未対応の値はデフォルト行のテキスト入力に流す
+    if (unmatched.length > 0 && defaultRow && defaultRow.xpath) {
+      fillItems.push({ field, xpath: defaultRow.xpath, value: unmatched.join(", ") });
+    }
+  }
+
+  return { clickItems, fillItems };
 }
 
 // ---- Questionnaire ----
