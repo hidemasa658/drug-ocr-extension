@@ -444,18 +444,30 @@ async function fetchDomMappings(domain) {
 }
 
 // 対象タブで items を実行する（タブ内で実行される関数）
-// items: [{ field, xpath, text? }]
+// items: [{ field, xpath, text?, branch? }]
 //   - 対象が INPUT / TEXTAREA で text が指定されている → fill (同じxpathに複数回くるとカンマ連結)
 //   - SELECT で text が指定されている → option 一致を value/label で探して set
 //   - それ以外 → click
+// 戻り値: [{ field, xpath, ok, branch, reason?, skipped? }]
+//   - female フィールドで要素未発見の場合は skipped: true (男性患者の想定)
 function injectByItems(items) {
   const results = [];
-  const fillBuffer = new Map(); // xpath -> { el, texts: [], fields: [] }
+  const fillBuffer = new Map(); // xpath -> { el, texts: [], fields: [], branches: [] }
+  const isFemaleField = (f) => /^female(:|$|#)/.test(f);
   for (const it of items) {
+    const baseBranch = it.branch || "click";
     try {
       const xr = document.evaluate(it.xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
       const el = xr.singleNodeValue;
-      if (!el) { results.push({ field: it.field, ok: false, reason: "要素未発見" }); continue; }
+      if (!el) {
+        if (isFemaleField(it.field)) {
+          // 男性患者だと妊娠・授乳の要素が無いことがある。スキップ扱い。
+          results.push({ field: it.field, xpath: it.xpath, branch: "skipped", ok: true, skipped: true, reason: "female 非該当（要素なし）" });
+        } else {
+          results.push({ field: it.field, xpath: it.xpath, branch: baseBranch, ok: false, reason: "要素未発見" });
+        }
+        continue;
+      }
       const tag = el.tagName;
       const isInput = tag === "INPUT" || tag === "TEXTAREA";
       const isSelect = tag === "SELECT";
@@ -463,9 +475,10 @@ function injectByItems(items) {
       const text = it.text != null ? String(it.text) : "";
 
       if ((isInput || isCE) && text !== "") {
-        const cur = fillBuffer.get(it.xpath) || { el, texts: [], fields: [] };
+        const cur = fillBuffer.get(it.xpath) || { el, texts: [], fields: [], branches: [] };
         cur.texts.push(text);
         cur.fields.push(it.field);
+        cur.branches.push("text");
         fillBuffer.set(it.xpath, cur);
       } else if (isSelect && text !== "") {
         let matched = false;
@@ -475,18 +488,18 @@ function injectByItems(items) {
           }
         }
         if (!matched) {
-          results.push({ field: it.field, ok: false, reason: `select候補に '${text}' なし` });
+          results.push({ field: it.field, xpath: it.xpath, branch: "select", ok: false, reason: `select候補に '${text}' なし` });
         } else {
           el.dispatchEvent(new Event("input", { bubbles: true }));
           el.dispatchEvent(new Event("change", { bubbles: true }));
-          results.push({ field: it.field, ok: true });
+          results.push({ field: it.field, xpath: it.xpath, branch: "select", ok: true });
         }
       } else {
         el.click();
-        results.push({ field: it.field, ok: true });
+        results.push({ field: it.field, xpath: it.xpath, branch: baseBranch, ok: true });
       }
     } catch (e) {
-      results.push({ field: it.field, ok: false, reason: String(e).slice(0, 100) });
+      results.push({ field: it.field, xpath: it.xpath || "", branch: baseBranch, ok: false, reason: String(e).slice(0, 100) });
     }
   }
   // fill をマージして一気に流し込む (同じxpath複数回の場合)
@@ -505,9 +518,9 @@ function injectByItems(items) {
         el.dispatchEvent(new Event("input", { bubbles: true }));
         el.dispatchEvent(new Event("change", { bubbles: true }));
       }
-      for (const f of buf.fields) results.push({ field: f, ok: true });
+      buf.fields.forEach((f, i) => results.push({ field: f, xpath: _xp, branch: buf.branches[i] || "text", ok: true }));
     } catch (e) {
-      for (const f of buf.fields) results.push({ field: f, ok: false, reason: String(e).slice(0, 100) });
+      buf.fields.forEach((f, i) => results.push({ field: f, xpath: _xp, branch: buf.branches[i] || "text", ok: false, reason: String(e).slice(0, 100) }));
     }
   }
   return results;
@@ -575,6 +588,22 @@ async function transferToActiveTab(record) {
     throw new Error(`${domain} のマッピング未登録（/admin/dom-mapping で設定）`);
   }
 
+  // === kakaritsuke を consultation に統合 (v0.7.0で追加) ===
+  // かかりつけ薬剤師は専用転写先を持たず、consultation の末尾に追記する。
+  // consultation が空または「なし」相当なら kakaritsuke はスキップ扱い。
+  let kakaritsukeAppended = false;
+  const kakaritsukeOriginal = String((record && record.kakaritsuke) || "").trim();
+  if (kakaritsukeOriginal && record) {
+    const consult = String(record.consultation || "").trim();
+    const consultIsNone = !consult || NONE_VALUE_PATTERNS.test(consult);
+    if (!consultIsNone) {
+      record = { ...record, consultation: consult + "\nかかりつけをここに登録: " + kakaritsukeOriginal };
+      kakaritsukeAppended = true;
+    }
+    // どちらの場合でも kakaritsuke 自体は単独で転写しない
+    record = { ...record, kakaritsuke: "" };
+  }
+
   const { items } = buildPerValueTasks(mappings, record);
 
   // 固定クリック (ドメイン共通既定値) も同じパイプラインで投入
@@ -620,9 +649,21 @@ async function transferToActiveTab(record) {
   }
 
   const results = Array.from(merged.values());
-  const okCount = results.filter((r) => r.ok).length;
+
+  // kakaritsuke の結果を追記 (consultation 統合の成功/スキップ判定)
+  if (kakaritsukeOriginal) {
+    const cRes = results.find((r) => r.field === "consultation" || r.field === "consultation:__unmatched__");
+    if (kakaritsukeAppended && cRes && cRes.ok) {
+      results.push({ field: "kakaritsuke", xpath: cRes.xpath || "", branch: "appended", appended_to: "consultation", ok: true });
+    } else {
+      results.push({ field: "kakaritsuke", xpath: "", branch: "skipped", ok: true, skipped: true, reason: kakaritsukeAppended ? "consultation転写失敗のためスキップ" : "consultationが「なし」のためスキップ" });
+    }
+  }
+
+  const okCount = results.filter((r) => r.ok && !r.skipped).length;
+  const skippedCount = results.filter((r) => r.skipped).length;
   const ngList = results.filter((r) => !r.ok);
-  if (debugMode) log("info", "transfer", `domain=${domain} ok=${okCount}/${results.length}`);
+  if (debugMode) log("info", "transfer", `domain=${domain} ok=${okCount}/${results.length} (skipped=${skippedCount})`);
   if (ngList.length > 0) {
     log("warn", "transfer-partial", ngList.map((r) => `${r.field}:${r.reason}`).join(", "));
   }
@@ -630,15 +671,25 @@ async function transferToActiveTab(record) {
   // サーバー側ログ送信 (失敗してもUIには影響させない)
   postTransferLog(record, domain, results).catch(() => {});
 
-  return { ok: okCount, total: results.length, ngList };
+  return { ok: okCount, total: results.length - skippedCount, ngList, skipped: skippedCount };
 }
 
 async function postTransferLog(record, domain, results) {
   if (!currentTenant) return;
-  const ok_fields = results.filter((r) => r.ok).map((r) => r.field);
-  const ng_fields = results
-    .filter((r) => !r.ok)
-    .map((r) => ({ field: r.field, reason: r.reason || "" }));
+  const ok_fields = results.filter((r) => r.ok).map((r) => ({
+    field: r.field,
+    xpath: r.xpath || "",
+    branch: r.branch || "",
+    ...(r.skipped ? { skipped: true } : {}),
+    ...(r.appended_to ? { appended_to: r.appended_to } : {}),
+    ...(r.reason ? { reason: r.reason } : {}),
+  }));
+  const ng_fields = results.filter((r) => !r.ok).map((r) => ({
+    field: r.field,
+    xpath: r.xpath || "",
+    branch: r.branch || "",
+    reason: r.reason || "",
+  }));
   let pc_name = "";
   try {
     const s = await chrome.storage.local.get(["pcName"]);
@@ -872,10 +923,11 @@ function makeQuestionnaireCard(r, roleLabel) {
     transferBtn.textContent = "...";
     try {
       const result = await transferToActiveTab(r);
+      const skipSuffix = result.skipped ? `（スキップ${result.skipped}）` : "";
       if (result.ngList.length === 0) {
-        showToast(`転写: ${result.ok}/${result.total} 件`);
+        showToast(`転写: ${result.ok}/${result.total} 件${skipSuffix}`);
       } else {
-        showToast(`一部失敗: ${result.ok}/${result.total} 件 (詳細はログ)`, true);
+        showToast(`一部失敗: ${result.ok}/${result.total} 件${skipSuffix} (詳細はログ)`, true);
       }
       transferBtn.textContent = "✓";
       setTimeout(() => { transferBtn.textContent = "転写"; transferBtn.disabled = false; }, 1500);
