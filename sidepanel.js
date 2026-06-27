@@ -626,7 +626,39 @@ async function transferToActiveTab(record) {
   if (ngList.length > 0) {
     log("warn", "transfer-partial", ngList.map((r) => `${r.field}:${r.reason}`).join(", "));
   }
+
+  // サーバー側ログ送信 (失敗してもUIには影響させない)
+  postTransferLog(record, domain, results).catch(() => {});
+
   return { ok: okCount, total: results.length, ngList };
+}
+
+async function postTransferLog(record, domain, results) {
+  if (!currentTenant) return;
+  const ok_fields = results.filter((r) => r.ok).map((r) => r.field);
+  const ng_fields = results
+    .filter((r) => !r.ok)
+    .map((r) => ({ field: r.field, reason: r.reason || "" }));
+  let pc_name = "";
+  try {
+    const s = await chrome.storage.local.get(["pcName"]);
+    pc_name = (s.pcName || "").trim();
+  } catch {}
+  try {
+    await apiFetch(`${API_BASE}/api/${encodeURIComponent(currentTenant)}/transfer-log`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        record_id: record && (record.id || null),
+        domain,
+        ok_fields,
+        ng_fields,
+        pc_name,
+      }),
+    });
+  } catch (e) {
+    if (debugMode) log("warn", "transfer-log", e.message);
+  }
 }
 
 // ---- マッピングとアンケート回答からクリック/フィルのタスクを作成 ----
@@ -939,6 +971,27 @@ async function init() {
       showToast(`APIトークン保存 (長さ ${apiToken.length})`);
       await loadTenants();  // 403で空だった場合は再取得
       if (!currentTenant && tenantList.length > 0) showStorePicker();
+    });
+  }
+
+  // PC名 (転写ログ用) を復元 + 保存ボタン配線
+  try {
+    const s = await chrome.storage.local.get(["pcName"]);
+    const pcName = (s.pcName || "").trim();
+    const pcInput = $("pcNameInput");
+    const pcStatus = $("pcNameStatus");
+    if (pcInput) pcInput.value = pcName;
+    if (pcStatus) pcStatus.textContent = pcName ? `保存済: ${pcName}` : "未設定 (転写ログにこの名前が記録されます)";
+  } catch {}
+  const pcSave = $("pcNameSave");
+  const pcInput = $("pcNameInput");
+  if (pcSave && pcInput) {
+    pcSave.addEventListener("click", async () => {
+      const v = pcInput.value.trim();
+      try { await chrome.storage.local.set({ pcName: v }); } catch {}
+      const pcStatus = $("pcNameStatus");
+      if (pcStatus) pcStatus.textContent = v ? `保存済: ${v}` : "クリア済";
+      showToast(v ? `PC名保存: ${v}` : "PC名クリア");
     });
   }
 
