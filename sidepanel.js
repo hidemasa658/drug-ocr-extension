@@ -872,8 +872,9 @@ function renderQuestionnaires(rows) {
   }
 }
 
-function field(label, value) {
+function field(label, value, opts) {
   if (!value) return null;
+  opts = opts || {};
   const row = document.createElement("div");
   row.className = "q-field";
   const l = document.createElement("span");
@@ -882,6 +883,11 @@ function field(label, value) {
   const v = document.createElement("span");
   v.className = "q-field__value";
   v.textContent = value;
+  if (opts.alert) {
+    v.style.color = "#c62828";
+    v.style.fontWeight = "bold";
+    l.style.color = "#c62828";
+  }
   row.appendChild(l);
   row.appendChild(v);
   return row;
@@ -973,7 +979,9 @@ function makeQuestionnaireCard(r, roleLabel) {
     ["かかりつけ", r.kakaritsuke],
   ];
   for (const [k, v] of fields) {
-    const row = field(k, v);
+    // 妊娠中・妊娠の可能性ありは赤字で強調 (服薬注意のため)
+    const alert = k === "妊娠・授乳" && /妊娠中|妊娠の可能性あり/.test(String(v || ""));
+    const row = field(k, v, { alert });
     if (row) body.appendChild(row);
   }
   card.appendChild(body);
