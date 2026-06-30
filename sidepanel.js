@@ -733,6 +733,7 @@ function expandXpaths(xp) {
 //     「かかりつけ: はい」のように識別子を付加する
 const FIELD_FILL_PREFIX = {
   kakaritsuke: "かかりつけ薬剤師: ",
+  weight: "体重: ",
 };
 
 function buildPerValueTasks(mappings, record) {
