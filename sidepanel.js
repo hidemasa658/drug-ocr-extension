@@ -408,7 +408,7 @@ const FORCE_CLICK_BY_DOMAIN_PATTERN = [
     pattern: /\.solamichi\.jp$/i,
     xpaths: [
       "//*[@id=\"generic-intention-button-want\"]",
-      "//*[@id=\"medicine-note-button-electronic\"]",
+      "//*[@id=\"medicine-note-button-pasting\"]",
       "//*[@id=\"medicine-take-state-button-good\"]",
       "//*[@id=\"remain-medicine-button-unknown\"]",
       "//*[@id=\"physical-condition-button-change\"]",
