@@ -728,6 +728,13 @@ function expandXpaths(xp) {
   return String(xp).split(";").map((s) => s.trim()).filter(Boolean);
 }
 
+// フィールド別の prefix (デフォルトxpath経由でfillする際に値の先頭に付ける)
+// 例: kakaritsuke="はい" の値が単独で備考欄に書かれると意味不明になるため
+//     「かかりつけ: はい」のように識別子を付加する
+const FIELD_FILL_PREFIX = {
+  kakaritsuke: "かかりつけ薬剤師: ",
+};
+
 function buildPerValueTasks(mappings, record) {
   // 統合 items: クリック/フィルを 1リスト に。要素タイプは inject側で判定。
   const items = [];
@@ -781,8 +788,10 @@ function buildPerValueTasks(mappings, record) {
 
     // 未対応の値はデフォルト行のテキスト入力に流す
     if (unmatched.length > 0 && defaultRow && defaultRow.xpath) {
+      const prefix = FIELD_FILL_PREFIX[field] || "";
+      const text = prefix + unmatched.join(", ");
       for (const xp of expandXpaths(defaultRow.xpath)) {
-        items.push({ field: `${field}:__unmatched__`, xpath: xp, text: unmatched.join(", ") });
+        items.push({ field: `${field}:__unmatched__`, xpath: xp, text });
       }
     }
   }
