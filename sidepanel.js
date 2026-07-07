@@ -787,6 +787,18 @@ function buildPerValueTasks(mappings, record) {
       }
     }
 
+    // value-row 単位の absent (回答に無い) 検出: radio_no_xpath があれば click する
+    // 用途: 「◯◯にチェックが無い時に対応する『なし』ラジオを押す」
+    //   例: lifestyle「車やバイクの運転」が未チェック → driving-dangerous-work-check-disable を click
+    for (const vRow of valueRows) {
+      if (!vRow.radio_no_xpath) continue;
+      if (parts.includes(vRow.value)) continue;
+      const absentXpaths = expandXpaths(vRow.radio_no_xpath);
+      if (absentXpaths.length > 0) {
+        pushItems(`${field}:__absent__:${vRow.value}`, absentXpaths, "");
+      }
+    }
+
     // 未対応の値はデフォルト行のテキスト入力に流す
     if (unmatched.length > 0 && defaultRow && defaultRow.xpath) {
       const prefix = FIELD_FILL_PREFIX[field] || "";
