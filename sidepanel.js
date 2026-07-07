@@ -992,6 +992,7 @@ function makeQuestionnaireCard(r, roleLabel) {
     ["体重", r.weight],
     ["疾患", r.disease],
     ["お薬", r.medicine],
+    ["併用中の市販薬", r.otc],
     ["食物アレルギー", r.allergy],
     ["副作用経験", r.sideeffects],
     ["習慣的摂取", r.habit],
