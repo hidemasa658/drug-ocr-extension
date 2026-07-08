@@ -734,7 +734,6 @@ function expandXpaths(xp) {
 const FIELD_FILL_PREFIX = {
   kakaritsuke: "かかりつけ薬剤師: ",
   weight: "体重: ",
-  visit_reason: "受診理由: ",
 };
 
 function buildPerValueTasks(mappings, record) {

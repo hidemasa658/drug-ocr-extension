@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ぞうさん薬局 - 薬名転写",
-  "version": "0.7.8",
+  "version": "0.7.9",
   "description": "お薬手帳の薬名転写、新患アンケート閲覧と薬局システムへの一括転写（PC毎に所属店舗を固定）",
   "permissions": ["scripting", "sidePanel", "storage", "tabs"],
   "host_permissions": ["https://okusuri.duckdns.org/*", "https://*/*"],
