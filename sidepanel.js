@@ -734,6 +734,7 @@ function expandXpaths(xp) {
 const FIELD_FILL_PREFIX = {
   kakaritsuke: "かかりつけ薬剤師: ",
   weight: "体重: ",
+  visit_reason: "受診理由: ",
 };
 
 function buildPerValueTasks(mappings, record) {
@@ -990,6 +991,7 @@ function makeQuestionnaireCard(r, roleLabel) {
     ["郵便番号", r.zipcode],
     ["住所", r.address],
     ["体重", r.weight],
+    ["受診理由", r.visit_reason],
     ["疾患", r.disease],
     ["お薬", r.medicine],
     ["併用中の市販薬", r.otc],
